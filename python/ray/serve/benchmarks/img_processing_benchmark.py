@@ -4,17 +4,19 @@ import sys
 import time
 ray.init(num_gpus=1, ignore_reinit_error=True)
 
+numClients = 1;
 numRequestsPerClient = 3;
-if len(sys.argv) > 2:
-    numRequestsPerClient = int(sys.argv[1]);
-
 numPreprocessCalls = 10;
-if len(sys.argv) > 3:
-    numWorkersPerBatcher = int(sys.argv[2]);
-
 numWorkersPerBatcher = 1
-if len(sys.argv) > 4:
-    numWorkersPerBatcher = int(sys.argv[3]);
+
+if len(sys.argv) > 1:
+    if len(sys.argv) != 5:
+        print("Wrong number of arguments");
+    else :
+        numClients = int(sys.argv[1]);
+        numRequestsPerClient = int(sys.argv[1]);
+        numWorkersPerBatcher = int(sys.argv[2]);
+        numWorkersPerBatcher = int(sys.argv[3]);
 
 @ray.remote
 def preprocess(img):
@@ -77,12 +79,13 @@ class Client:
 
     async def run_concurrent(self):
         print("started")
-        time.sleep(10)
+        time.sleep(1)
         img_ref = [preprocess.remote(...) for _ in range(numPreprocessCalls)]
         ref = self.batcher.request.remote([img_ref])
         print("finished")
 
 client = Client.remote()
+# [clients = Client.remote() for _ in range(numClients)]
 
 ray.get([client.run_concurrent.remote() for _ in range(numRequestsPerClient)])
 
