@@ -11,9 +11,9 @@ from time import process_time
 ray.init(num_gpus=1, ignore_reinit_error=True)
 
 num_clients = 1
-num_requests_per_client = 2 #3
-num_preprocess_calls = 1 #10
-num_workers_per_batcher = 1
+num_requests_per_client = 1
+num_preprocess_calls = 1
+batch_size = 1
 failure_percentage = 1
 
 if len(sys.argv) > 1:
@@ -23,7 +23,7 @@ if len(sys.argv) > 1:
         num_clients = int(sys.argv[1]);
         num_requests_per_client = int(sys.argv[1]);
         num_preprocess_calls = int(sys.argv[2]);
-        num_workers_per_batcher = int(sys.argv[3]);
+        batch_size = int(sys.argv[3]);
 
 @ray.remote
 def preprocess(img):
@@ -62,10 +62,11 @@ class Worker:
             sys.exit()
 
         # Predict and return results
-        predictions = self.probability_model.predict(ray.get(batch))
         results = []
-        for pred in predictions:
-            results.append(np.argmax(pred))
+        for img in batch:
+            predictions = self.probability_model.predict(ray.get(img))
+            for pred in predictions:
+                results.append(np.argmax(pred))
         return results
 
 @ray.remote(max_restarts=1, max_task_retries=1)
@@ -78,15 +79,19 @@ class Batcher:
         # print(os.getpid())
         self.buffer.append(img_refs[0])
 
-        # print(len(self.buffer))
-        if len(self.buffer) == num_workers_per_batcher:
+        print(len(self.buffer))
+        print(self.buffer)
+        if len(self.buffer) == batch_size:
+            print("batch")
             worker = Worker.remote()
-            predictions = ray.get(worker.predict.remote(self.buffer.pop()))
+            predictions = ray.get(worker.predict.remote(self.buffer))
             self.results.append(predictions)
+            self.buffer = []
             # print(predictions)
-            # self.buffer = []
+            
 
     def get_results(self):
+        # print(self.results)
         return self.results
 
 
@@ -101,13 +106,16 @@ class Client:
         self.batcher = Batcher.remote()
 
     async def run_concurrent(self):
-        print("started")
-        img_ref = [preprocess.remote(test_images[:10]) for _ in range(num_preprocess_calls)]
+        # print("started")
+        img_ref = [preprocess.remote(test_images[:1]) for _ in range(num_preprocess_calls)]
         ref = ray.get(self.batcher.request.remote([img_ref]))
+        # print("finished")
+
+    def get_results(self):
         results = ray.get(self.batcher.get_results.remote())
         # print(len(results[0]))
-        print(results)
-        print("finished")
+        # print(results)
+        
 client = Client.remote()
 # [clients = Client.remote() for _ in range(numClients)]
 
@@ -115,6 +123,9 @@ tstart = process_time()
 ray.get([client.run_concurrent.remote() for _ in range(num_requests_per_client)])
 tstop = process_time() 
 print("time: ", tstop-tstart)
+
+results = ray.get(client.get_results.remote())
+print(results)
 
 # `ObjectRef`
 # img_ref = [preprocess.remote(...) for _ in range(100)]
