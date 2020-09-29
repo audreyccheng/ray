@@ -56,15 +56,12 @@ class Worker:
             sys.exit(-1)
 
         # Predict and return results
-        # pstart = time.time()
-        img_batch = np.array(batch).reshape(len(batch),224, 224,3)
-        predictions = self.model.predict(img_batch) 
-        # pstop = time.time()
-        # print("worker time: ", pstop-pstart)
-        # predictions = []
-        # for i in range(len(batch)):
-        #     predictions.append(1)
-        # time.sleep(0.1)
+        #img_batch = np.array(batch).reshape(len(batch),224, 224,3)
+        #predictions = self.model.predict(img_batch) 
+        predictions = []
+        for i in range(len(batch)):
+            predictions.append(1)
+        time.sleep(0.1)
         return predictions
 
     def predict2(self, *batch):
@@ -232,16 +229,34 @@ if __name__ == '__main__':
     owner_resource = None
     node_index = 0
     # Assign clients and batchers to head node
-    for resource in (client_resources + batcher_resources):
-        if "CPU" not in head_node[0]["Resources"]:
-            continue
+    # for resource in (client_resources + batcher_resources):
+    #     if "CPU" not in head_node[0]["Resources"]:
+    #         continue
 
-        print("Assigning", resource, "to node", head_node[0]["NodeID"], head_node[0]["Resources"])
-        ray.experimental.set_resource(resource, 100, head_node[0]["NodeID"])
+    #     print("Assigning", resource, "to node", head_node[0]["NodeID"], head_node[0]["Resources"])
+    #     ray.experimental.set_resource(resource, 100, head_node[0]["NodeID"])
 
     # Assign worker nodes
     assert len(nodes) >= len(worker_resources)
     for node, resource in zip(nodes, worker_resources):
+        if "CPU" not in node["Resources"]:
+            continue
+
+        print("Assigning", resource, "to node", node["NodeID"], node["Resources"])
+        ray.experimental.set_resource(resource, 100, node["NodeID"])
+
+    for i in range(len(client_resources)):
+        resource = client_resources[i]
+        node = nodes[i % args.num_batchers]
+        if "CPU" not in node["Resources"]:
+            continue
+
+        print("Assigning", resource, "to node", node["NodeID"], node["Resources"])
+        ray.experimental.set_resource(resource, 100, node["NodeID"])
+
+    for i in range(len(batcher_resources)):
+        resource = batcher_resources[i]
+        node = nodes[i % args.num_batchers]
         if "CPU" not in node["Resources"]:
             continue
 

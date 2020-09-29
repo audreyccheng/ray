@@ -36,7 +36,7 @@ def preprocess2(img):
     return img
 
 # Use an actor to keep the model in GPU memory.
-@ray.remote(num_cpus=0, num_gpus=0, max_restarts=-1, max_task_retries=-1)
+@ray.remote(num_cpus=0, num_gpus=0) #, max_restarts=-1, max_task_retries=-1)
 class Worker:
     def __init__(self, worker_fp):
         self.worker_fp = worker_fp
@@ -56,15 +56,12 @@ class Worker:
             sys.exit(-1)
 
         # Predict and return results
-        # pstart = time.time()
-        img_batch = np.array(batch).reshape(len(batch),224, 224,3)
-        predictions = self.model.predict(img_batch) 
-        # pstop = time.time()
-        # print("worker time: ", pstop-pstart)
-        # predictions = []
-        # for i in range(len(batch)):
-        #     predictions.append(1)
-        # time.sleep(0.1)
+        #img_batch = np.array(batch).reshape(len(batch),224, 224,3)
+        #predictions = self.model.predict(img_batch) 
+        predictions = []
+        for i in range(len(batch)):
+            predictions.append(1)
+        time.sleep(0.1)
         return predictions
 
     def predict2(self, *batch):
@@ -76,7 +73,7 @@ class Worker:
         time.sleep(0.1)
         return batch
 
-@ray.remote(max_restarts=-1, max_task_retries=-1)
+@ray.remote #(max_restarts=-1, max_task_retries=-1)
 class Batcher:
     def __init__(self, batch_size, batcher_fp, worker_fp, pass_by_value, num_workers, worker_resource):
         self.batcher_fp = batcher_fp
@@ -84,46 +81,52 @@ class Batcher:
         for i in range(num_workers):
             self.workers.append(Worker.options(resources={worker_resource: 1}).remote(worker_fp))
         self.batch_size = batch_size
-        self.queue = asyncio.Queue(maxsize=batch_size)
+        # self.queue = asyncio.Queue(maxsize=batch_size)
+        self.queue = []
         self.pass_by_value = pass_by_value
+        self.predictions = []
         # print("batch size", batch_size)
-        self.results = []
-        self.futures = []
+        # self.results = []
+        # self.futures = []
 
     def start(self):
         print("batcher alive")
         ray.get([worker.start.remote() for worker in self.workers])
 
-    async def request(self, img_refs):
+    def request(self, img_refs):
         # print("future ", img_refs[0])
-        loop = asyncio.get_event_loop()
-        fut = loop.create_future()
-        self.futures.append(fut)
+        # loop = asyncio.get_event_loop()
+        # fut = loop.create_future()
+        # self.futures.append(fut)
 
         # print("batch put", img_refs[0])
         if self.pass_by_value:
-            await self.queue.put(img_refs)
+            self.queue.append(img_refs)
+            # await self.queue.put(img_refs)
         else:
-            await self.queue.put(img_refs[0])
+            self.queue.append(img_refs[0])
+            # await self.queue.put(img_refs[0])
         # print(self.queue.full())
         # print("put done")
         # print(self.queue.qsize())
 
-        if self.queue.qsize() == self.batch_size:
-          #  print("batch")
+        # if self.queue.qsize() == self.batch_size:
+        if len(self.queue) == self.batch_size:
+            # print("batch")
             batch = []
-            futures = []
+            # futures = []
             for i in range(self.batch_size):
-                batch.append(await self.queue.get())
-                futures.append(self.futures.pop(0))
+                batch.append(self.queue.pop(0))
+                # futures.append(self.futures.pop(0))
             #for b in batch:
                 #print("job ", b)
             tmp_worker = self.workers.pop(0)
             self.workers.append(tmp_worker)
-            predictions = await self.workers[0].predict.remote(*batch)
-            for pred, future in zip(predictions, futures):
-                #print("result ", pred)
-                future.set_result(pred)
+            self.predictions.append(self.workers[0].predict.remote(*batch))
+            # for pred, future in zip(predictions, futures):
+            #     #print("result ", pred)
+            #     future.set_result(pred)
+            return
             # self.futures.clear()
             # return predictions[len(predictions) - 1]
         # else:
@@ -133,15 +136,18 @@ class Batcher:
           #  print("batcher failed")
             pid = os.getpid()
             os.kill(pid, signal.SIGKILL)
-
-        return await fut
+        return
+        # return await fut
+    def complete_requests(self):
+        results = ray.get(self.predictions)
+        return results
 
 
 # Async actor to concurrently serve Batcher requests
 #fashion_mnist = keras.datasets.fashion_mnist
 #(train_images, train_labels), (test_images, test_labels) = fashion_mnist.load_data()
 # print(test_images.shape)
-@ray.remote(max_restarts=1, max_task_retries=1)
+@ray.remote #(max_restarts=1, max_task_retries=1)
 class Client:
     # One batcher per client
     def __init__(self, batcher, pass_by_value, worker_resource):
@@ -154,18 +160,24 @@ class Client:
         print("client alive")
         ray.get(self.batcher.start.remote())
 
-    async def run_concurrent(self):
-        #print("started")
+    def run_concurrent(self):
+        # print("started")
         img_ref = preprocess.options(resources={self.worker_resource: 1}).remote(self.img)
         # rand_int = randrange(100) 
         if self.pass_by_value:
-            ref = await self.batcher.request.remote(img_ref)
+            ref = ray.get(self.batcher.request.remote(img_ref))
         else:
-            ref = await self.batcher.request.remote([img_ref])
+            ref = ray.get(self.batcher.request.remote([img_ref]))
+        return
             #print("ref ", ref)
             #print("job ", job_int)
             #assert(ref == job_int)
-        #print("finished")
+        # print("finished")
+
+    def get_results(self):
+        print("getting results")
+        results = ray.get(self.batcher.complete_requests.remote())
+        return results
         
 
 if __name__ == '__main__':
@@ -232,16 +244,34 @@ if __name__ == '__main__':
     owner_resource = None
     node_index = 0
     # Assign clients and batchers to head node
-    for resource in (client_resources + batcher_resources):
-        if "CPU" not in head_node[0]["Resources"]:
-            continue
+    # for resource in (client_resources + batcher_resources):
+    #     if "CPU" not in head_node[0]["Resources"]:
+    #         continue
 
-        print("Assigning", resource, "to node", head_node[0]["NodeID"], head_node[0]["Resources"])
-        ray.experimental.set_resource(resource, 100, head_node[0]["NodeID"])
+    #     print("Assigning", resource, "to node", head_node[0]["NodeID"], head_node[0]["Resources"])
+    #     ray.experimental.set_resource(resource, 100, head_node[0]["NodeID"])
 
     # Assign worker nodes
     assert len(nodes) >= len(worker_resources)
     for node, resource in zip(nodes, worker_resources):
+        if "CPU" not in node["Resources"]:
+            continue
+
+        print("Assigning", resource, "to node", node["NodeID"], node["Resources"])
+        ray.experimental.set_resource(resource, 100, node["NodeID"])
+
+    for i in range(len(client_resources)):
+        resource = client_resources[i]
+        node = nodes[i % args.num_batchers]
+        if "CPU" not in node["Resources"]:
+            continue
+
+        print("Assigning", resource, "to node", node["NodeID"], node["Resources"])
+        ray.experimental.set_resource(resource, 100, node["NodeID"])
+
+    for i in range(len(batcher_resources)):
+        resource = batcher_resources[i]
+        node = nodes[i % args.num_batchers]
         if "CPU" not in node["Resources"]:
             continue
 
@@ -267,8 +297,13 @@ if __name__ == '__main__':
     tstart = time.time()
     results = []
     for client in clients:
-        results += [client.run_concurrent.remote() for _ in range(args.num_total_requests // args.num_clients)] #num_requests_per_client)])
-    ray.get(results)
+        [client.run_concurrent.remote() for _ in range(args.num_total_requests // args.num_clients)]
+        # for _ in range(args.num_total_requests):
+        #     ray.get(client.run_concurrent.remote())
+
+    results = ray.get(clients[0].get_results.remote())
+        # results += [client.run_concurrent.remote() for _ in range(args.num_total_requests // args.num_clients)]
+    # ray.get(results)
     #tstop = process_time() 
     tstop = time.time()
     print("time: ", tstop-tstart)
@@ -302,9 +337,4 @@ if __name__ == '__main__':
 #         ray.get(client.run_concurrent.remote())
 #     except ray.exceptions.RayActorError:
 #         print('FAILURE')
-
-
-
-
-
 
