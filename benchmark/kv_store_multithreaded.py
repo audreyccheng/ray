@@ -6,7 +6,6 @@ import os
 from random import randrange
 import ray
 import time
-import threading
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
@@ -20,27 +19,17 @@ parser.add_argument(
 class Server(object):
 	def __init__(self):
 		self.kvstore = {}
-		self.lock = threading.Lock()
 
 	def put(self, key, value):
-		self.lock.acquire()
-		try:
-			self.kvstore[key] = value
-		finally:
-			self.lock.release()
+		self.kvstore[key] = value
 
 	def get(self, key):
-		val = None
-		self.lock.acquire()
-		try:
-			if key in self.kvstore:
-				val = self.kvstore[key]
-		finally:
-			self.lock.release()
-		return val
+		if key in self.kvstore:
+			return self.kvstore[key]
+		return None
 
-	# def delete(self, key):
-	# 	return self.kvstore.pop('key', None)
+	def delete(self, key):
+		return self.kvstore.pop('key', None)
 
 @ray.remote
 class Client(object):
@@ -61,7 +50,7 @@ if __name__ == "__main__":
 	ray.init()
 
 	# server = Server.remote()
-	servers = [Server.remote() for _ in range(args.num_servers)] # options(max_concurrency=10000).
+	servers = [Server.remote() for _ in range(args.num_servers)]
 	# client = Client.remote(servers)
 	clients = [Client.remote(servers) for _ in range(args.num_clients)]
 
