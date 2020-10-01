@@ -36,16 +36,17 @@ class Server(object):
 
 @ray.remote(num_cpus=0)
 class Client(object):
-	def __init__(self, servers):
+	def __init__(self, servers, num_requests):
 		self.servers = servers
+		self.num_requests = num_requests
 
 	def run_op(self):
 		rand_val = np.random.rand()
 		rand_server = randrange(len(self.servers))
 		if rand_val < 0.5:
-			self.servers[rand_server].put.remote(randrange(100), rand_val)
+			self.servers[rand_server].put.remote(randrange(self.num_requests), rand_val)
 		else:
-			self.servers[rand_server].get.remote(randrange(100))
+			self.servers[rand_server].get.remote(randrange(self.num_requests))
 
 if __name__ == "__main__":
 	import argparse
@@ -126,7 +127,7 @@ if __name__ == "__main__":
 		) for i in range(args.num_servers)] # options(max_concurrency=10000).
 	# client = Client.remote(servers)
 	clients = [Client.options(resources={client_resources[i % len(client_resources)]: 1}).remote(
-		servers) for i in range(args.num_clients)]
+		servers, args.num_requests) for i in range(args.num_clients)]
 
 	tstart = time.time()
 	# for _ in range(args.num_requests):
