@@ -5,14 +5,15 @@ import numpy as np
 import os
 from random import randrange
 import ray
+import sys
 import time
 import threading
 
-@ray.remote
+@ray.remote(max_restarts=1, max_task_retries=1)
 class Server(object):
 	def __init__(self):
 		self.kvstore = {}
-		self.lock = threading.Lock()
+		# self.lock = threading.Lock()
 
 	def put(self, key, value):
 		self.kvstore[key] = value
@@ -44,13 +45,13 @@ class Client(object):
 		self.servers = servers
 		self.num_requests = num_requests
 
-	def run_op(self):
+	async def run_op(self):
 		rand_val = np.random.rand()
 		rand_server = randrange(len(self.servers))
 		if rand_val < 0.5:
-			self.servers[rand_server].put.remote(randrange(self.num_requests), rand_val)
+			return await self.servers[rand_server].put.remote(randrange(self.num_requests), rand_val)
 		else:
-			self.servers[rand_server].get.remote(randrange(self.num_requests))
+			return await self.servers[rand_server].get.remote(randrange(self.num_requests))
 
 if __name__ == "__main__":
 	import argparse
@@ -75,7 +76,11 @@ if __name__ == "__main__":
 	refs = []
 	for client in clients:
 		refs += [client.run_op.remote() for _ in range(args.num_requests // args.num_clients)]
-	ray.get(refs)
+
+	# ray.get(refs)
+	print(ray.get(ray.get(refs)))
+	# for i in range(10):
+	# 	print(ray.get(refs[i:i*1000]))
 
 	tend = time.time()
 	print("time: ", tend - tstart)

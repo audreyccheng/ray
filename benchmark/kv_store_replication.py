@@ -6,9 +6,26 @@ import os
 from random import randrange
 import ray
 import time
+import threading
 
 @ray.remote
 class Server(object):
+	def __init__(self, backup):
+		self.kvstore = {}
+		self.backup = backup
+
+	def put(self, key, value):
+		self.kvstore[key] = value
+		self.backup.put.remote(key, value)
+
+	def get(self, key):
+		val = None
+		if key in self.kvstore:
+			val = self.kvstore[key]
+		return val
+
+@ray.remote
+class BackupServer(object):
 	def __init__(self):
 		self.kvstore = {}
 
@@ -20,23 +37,20 @@ class Server(object):
 		if key in self.kvstore:
 			val = self.kvstore[key]
 		return val
-
-	# def delete(self, key):
-	# 	return self.kvstore.pop('key', None)
-
+	
 @ray.remote(num_cpus=0)
 class Client(object):
 	def __init__(self, servers, num_requests):
 		self.servers = servers
 		self.num_requests = num_requests
 
-	async def run_op(self):
+	def run_op(self):
 		rand_val = np.random.rand()
 		rand_server = randrange(len(self.servers))
 		if rand_val < 0.5:
-			return await self.servers[rand_server].put.remote(randrange(self.num_requests), rand_val)
+			self.servers[rand_server].put.remote(randrange(self.num_requests), rand_val)
 		else:
-			return await self.servers[rand_server].get.remote(randrange(self.num_requests))
+			self.servers[rand_server].get.remote(randrange(self.num_requests))
 
 if __name__ == "__main__":
 	import argparse
@@ -113,11 +127,13 @@ if __name__ == "__main__":
 		ray.experimental.set_resource(resource, 100, node["NodeID"])
 
 	# server = Server.remote()
-	servers = [Server.options(resources={server_resources[i % len(server_resources)]: 1},
-		max_concurrency=64).remote() for i in range(args.num_servers)] # options(max_concurrency=10000).
+	backup_servers = [BackupServer.options(resources={server_resources[i % len(server_resources)]: 1}).remote(
+		) for i in range(args.num_servers)]
+	servers = [Server.options(resources={server_resources[i % len(server_resources)]: 1}).remote(
+		backup_servers[i]) for i in range(args.num_servers)] # options(max_concurrency=10000).
 	# client = Client.remote(servers)
-	clients = [Client.options(resources={client_resources[i % len(client_resources)]: 1},
-		max_concurrency=64).remote(servers, args.num_requests) for i in range(args.num_clients)]
+	clients = [Client.options(resources={client_resources[i % len(client_resources)]: 1}).remote(
+		servers, args.num_requests) for i in range(args.num_clients)]
 
 	tstart = time.time()
 	# for _ in range(args.num_requests):

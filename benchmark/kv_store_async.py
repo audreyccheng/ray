@@ -22,15 +22,20 @@ class Server(object):
 		self.kvstore = {}
 
 	def put(self, key, value):
+		# time.sleep(5)
+		# return 0
 		self.kvstore[key] = value
+		
 
 	def get(self, key):
+		# time.sleep(5)
+		# return 0
 		if key in self.kvstore:
 			return self.kvstore[key]
 		return None
 
-	def delete(self, key):
-		return self.kvstore.pop('key', None)
+	# def delete(self, key):
+	# 	return self.kvstore.pop('key', None)
 
 
 @ray.remote
@@ -42,23 +47,23 @@ class Client(object):
 		rand_val = np.random.rand()
 		rand_server = randrange(len(self.servers))
 		if rand_val < 0.5:
-			await self.servers[rand_server].put.remote(randrange(100), rand_val)
+			return await self.servers[rand_server].put.remote(randrange(1), rand_val)
 		else:
-			await self.servers[rand_server].get.remote(randrange(100))
+			return await self.servers[rand_server].get.remote(randrange(1))
 
 if __name__ == "__main__":
 	args = parser.parse_args()
 
 	ray.init()
 
-	servers = [Server.remote() for _ in range(args.num_servers)]
+	servers = [Server.options(max_concurrency=10).remote() for _ in range(args.num_servers)]
 	clients = [Client.remote(servers) for _ in range(args.num_clients)]
 
 	tstart = time.time()
 	refs = []
 	for client in clients:
-		refs += [client.run_op.remote() for _ in range(args.num_requests)]
-	ray.get(refs)
+		print(ray.get([client.run_op.remote() for _ in range(args.num_requests)]))
+	# print(ray.get(refs))
 
 	tend = time.time()
 	print("time: ", tend - tstart)
