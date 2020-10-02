@@ -5,38 +5,57 @@ import numpy as np
 import os
 from random import randrange
 import ray
+import sys
 import time
 import threading
 
-@ray.remote
+@ray.remote(max_restarts=-1, max_task_retries=-1)
 class Server(object):
-	def __init__(self, backup):
-		self.kvstore = {}
+	def __init__(self, backup, index):
+		tstart = time.time()
 		self.backup = backup
+		self.kvstore = ray.get(backup.restore_primary.remote())
+		self.index = index
+		tend = time.time()
+		print("backup size: ", len(self.kvstore))
+		print("recovery time: ", tend - tstart)
 
 	def put(self, key, value):
+		if self.index == 0 and np.random.rand() < 0.00002:
+			if not ray.get(self.backup.check_restarted.remote()):
+				sys.exit()
 		self.kvstore[key] = value
 		self.backup.put.remote(key, value)
+		# print("server size: ", len(self.kvstore))
 
 	def get(self, key):
-		val = None
 		if key in self.kvstore:
-			val = self.kvstore[key]
-		return val
+			return self.kvstore[key]
+		return None
 
 @ray.remote
 class BackupServer(object):
 	def __init__(self):
 		self.kvstore = {}
+		self.restarted = False
+		self.restart_count = 0
 
 	def put(self, key, value):
 		self.kvstore[key] = value
 
 	def get(self, key):
-		val = None
 		if key in self.kvstore:
-			val = self.kvstore[key]
-		return val
+			return self.kvstore[key]
+		return None
+
+	def check_restarted(self):
+		return self.restarted
+
+	def restore_primary(self):
+		self.restart_count += 1
+		if self.restart_count == 5:
+			self.restarted = True
+		return self.kvstore
 	
 @ray.remote(num_cpus=0)
 class Client(object):
@@ -44,13 +63,13 @@ class Client(object):
 		self.servers = servers
 		self.num_requests = num_requests
 
-	def run_op(self):
+	async def run_op(self):
 		rand_val = np.random.rand()
 		rand_server = randrange(len(self.servers))
 		if rand_val < 0.5:
-			self.servers[rand_server].put.remote(randrange(self.num_requests), rand_val)
+			return await self.servers[rand_server].put.remote(randrange(self.num_requests), rand_val)
 		else:
-			self.servers[rand_server].get.remote(randrange(self.num_requests))
+			return await self.servers[rand_server].get.remote(randrange(self.num_requests))
 
 if __name__ == "__main__":
 	import argparse
@@ -65,7 +84,7 @@ if __name__ == "__main__":
 	args = parser.parse_args()
 	parser = argparse.ArgumentParser()
 
-	ray.init(address="auto")
+	ray.init(address="auto", ignore_reinit_error=True)
 
 	nodes = [node for node in ray.nodes() if node["Alive"]]
 	while len(nodes) < args.num_nodes:
@@ -127,13 +146,13 @@ if __name__ == "__main__":
 		ray.experimental.set_resource(resource, 100, node["NodeID"])
 
 	# server = Server.remote()
-	backup_servers = [BackupServer.options(resources={server_resources[i % len(server_resources)]: 1}).remote(
-		) for i in range(args.num_servers)]
-	servers = [Server.options(resources={server_resources[i % len(server_resources)]: 1}).remote(
-		backup_servers[i]) for i in range(args.num_servers)] # options(max_concurrency=10000).
+	backup_servers = [BackupServer.options(resources={server_resources[i % len(server_resources)]: 1},
+		max_concurrency=1).remote() for i in range(args.num_servers)]
+	servers = [Server.options(resources={server_resources[i % len(server_resources)]: 1},
+		max_concurrency=1000).remote(backup_servers[i], i) for i in range(args.num_servers)] # options(max_concurrency=10000).
 	# client = Client.remote(servers)
 	clients = [Client.options(resources={client_resources[i % len(client_resources)]: 1}).remote(
-		servers, args.num_requests) for i in range(args.num_clients)]
+            servers, args.num_requests) for i in range(args.num_clients)]
 
 	tstart = time.time()
 	# for _ in range(args.num_requests):

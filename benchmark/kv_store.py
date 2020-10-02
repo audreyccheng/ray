@@ -116,8 +116,8 @@ if __name__ == "__main__":
 	servers = [Server.options(resources={server_resources[i % len(server_resources)]: 1},
 		max_concurrency=64).remote() for i in range(args.num_servers)] # options(max_concurrency=10000).
 	# client = Client.remote(servers)
-	clients = [Client.options(resources={client_resources[i % len(client_resources)]: 1},
-		max_concurrency=64).remote(servers, args.num_requests) for i in range(args.num_clients)]
+	clients = [Client.options(resources={client_resources[i % len(client_resources)]: 1}).remote(
+            servers, args.num_requests) for i in range(args.num_clients)]
 
 	tstart = time.time()
 	# for _ in range(args.num_requests):

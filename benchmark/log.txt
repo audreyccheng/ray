@@ -1,0 +1,4 @@
+[2m[36m(pid=83944)[0m backup size:  0
+[2m[36m(pid=83944)[0m recovery time:  0.0015530586242675781
+[2m[36m(pid=83934)[0m backup size:  5001
+[2m[36m(pid=83934)[0m recovery time:  0.002020120620727539

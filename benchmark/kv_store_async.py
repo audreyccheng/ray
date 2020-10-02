@@ -62,10 +62,17 @@ if __name__ == "__main__":
 	tstart = time.time()
 	refs = []
 	for client in clients:
-		print(ray.get([client.run_op.remote() for _ in range(args.num_requests)]))
-	# print(ray.get(refs))
-
+		refs += [client.run_op.remote() for _ in range(args.num_requests)]
 	tend = time.time()
 	print("time: ", tend - tstart)
+
+	tstart = time.time()
+	ray.get(refs)
+	tend = time.time()
+	print("time: ", tend - tstart)
+	# print(ray.get(refs[:int(args.num_requests/2)]))
+	# print(ray.get(refs[int(args.num_requests/2):]))
+
+	
 	print("throughput: ", args.num_requests / (tend - tstart))
 
