@@ -3,16 +3,16 @@ cluster_name: ray_0_7_osdi
 
 # The minimum number of workers nodes to launch in addition to the head
 # node. This number should be >= 0.
-min_workers: 4
+min_workers: 3 
 
 # The maximum number of workers nodes to launch in addition to the head
 # node. This takes precedence over min_workers.
-max_workers: 4
+max_workers: 3
 
 # The initial number of worker nodes to launch in addition to the head
 # node. When the cluster is first brought up (or when it is refreshed with a
 # subsequent `ray up`) this number of nodes will be started.
-initial_workers: 4
+initial_workers: 3
 
 # Whether or not to autoscale aggressively. If this is enabled, if at any point
 #   we would start more workers, we start at least enough to bring us to
@@ -45,16 +45,15 @@ auth:
 # By default Ray creates a new private keypair, but you can also use your own.
 # If you do so, make sure to also set "KeyName" in the head and worker node
 # configurations below.
-#    ssh_private_key: /path/to/your/key.pem
+#    ssh_private_key: /Users/samyu/Documents/ray/rayft.pem
 
 # Provider-specific config for the head node, e.g. instance type. By default
 # Ray will auto-configure unspecified fields such as SubnetId and KeyName.
 # For more documentation on available fields, see:
 # http://boto3.readthedocs.io/en/latest/reference/services/ec2.html#EC2.ServiceResource.create_instances
 head_node:
-    InstanceType: m5.xlarge
-    ImageId: ami-0764eacdf56f1b2bc
-
+    InstanceType: m5.4xlarge
+    ImageId: ami-0a2363a9cff180a64
     # Additional options in the boto docs.
 
 # Provider-specific config for worker nodes, e.g. instance type. By default
@@ -62,16 +61,13 @@ head_node:
 # For more documentation on available fields, see:
 # http://boto3.readthedocs.io/en/latest/reference/services/ec2.html#EC2.ServiceResource.create_instances
 worker_nodes:
-    InstanceType: m5.8xlarge # p3.16xlarge #
-    ImageId: ami-0764eacdf56f1b2bc
-
-    # InstanceMarketOptions:
-    #     MarketType: spot
+   InstanceType: m5.4xlarge # p3.16xlarge #
+   ImageId: ami-0a2363a9cff180a64
 
 # Files or directories to copy to the head and worker nodes. The format is a
 # dictionary from REMOTE_PATH: LOCAL_PATH, e.g.
 file_mounts:
-    /home/ubuntu/ray/benchmarks: /Users/accheng/Documents/ray_notebooks/ray/benchmark  
+    /home/ubuntu/ray/benchmarks: /Users/samyu/Documents/ray/benchmark  
     # /Users/audrey/ray_notebooks/ray/benchmark 
     # /home/swang/audrey-benchmarks
     # /home/ubuntu/husky.mp4: /home/swang/data/husky.mp4
