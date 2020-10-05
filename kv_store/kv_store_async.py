@@ -21,11 +21,16 @@ class Server(object):
 	def __init__(self):
 		self.kvstore = {}
 
+	# def get_size(self):
+	# 	return len(self.kvstore);
+
 	def put(self, key, value):
 		# time.sleep(5)
 		# return 0
-		self.kvstore[key] = value
-		
+		if key in self.kvstore:
+			self.kvstore[key] += " " + value
+		else:
+			self.kvstore[key] = value
 
 	def get(self, key):
 		# time.sleep(5)
