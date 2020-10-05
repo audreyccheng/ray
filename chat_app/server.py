@@ -8,13 +8,14 @@ import websockets
 
 ray.init()
 sys.path.insert(1, '../kv_store')
-import kv_store_async as kv_store
+import kv_store_replication_sn as kv_store
 
 # The set of clients connected to this server
 chats = {} #: { chat_name: {websocket: name}}
 LISTEN_ADDRESS = ('0.0.0.0', 8080)
+backup_server = kv_store.BackupServer.options(max_concurrency=1).remote()
 kv_store_server = kv_store.Server.options(
-	name="ServerActor", lifetime="detached", max_concurrency=10).remote()
+	name="ServerActor", lifetime="detached", max_concurrency=10).remote(backup_server, 0)
 
 def timestamp_to_float(ts):
 	return int(datetime.datetime.fromtimestamp(float(ts)/1000.0).timestamp()*1000)
@@ -56,6 +57,7 @@ async def client_handler(websocket, path):
 				await client.send('{}: {}'.format(name, message))
 				# await client.send('{}: val {} ts {}'.format(name, val, dt))
 		except:
+			# Remove client from chat_name group
 			their_name = chats[chat_name][websocket]
 			del chats[chat_name][websocket]
 			print('Client closed connection', websocket)
