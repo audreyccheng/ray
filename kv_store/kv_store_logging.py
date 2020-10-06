@@ -15,6 +15,7 @@ class Log(object):
 		self.store = RayInternalKVStore()
 
 	def log_operation(self, op, key, value=None):
+		# These are synchronous operations for consistency reasons for now.
 		if (op == "put" and value != None):
 			rec = PutRecord(key, value)
 			self.log.append(rec)		
@@ -27,11 +28,11 @@ class Log(object):
 		self.save_checkpoint()
 
 	def save_checkpoint(self):
-		store.hset("checkpoint", self.to_string())
+		self.store.put("checkpoint", self.to_string().encode())
 
-	def to_string():
+	def to_string(self):
 		log_entries = [x.to_string() for x in self.log]
-		return [{}].format(", ".join(log_entries))
+		return "{}".format(", ".join(log_entries))
 		
 
 class PutRecord(object):
@@ -57,18 +58,21 @@ class GetRecord(object):
 class Server(object):
 	def __init__(self):
 		self.kvstore = {}
-		self.log = Log()
+		self.log = Log.remote()
 
 	def put(self, key, value):
-		self.log.log_operation("put", key, value)
+		self.log.log_operation.remote("put", key, value)
 		self.kvstore[key] = value
 
 	def get(self, key):
-		self.log.log_operation("get", key)
+		self.log.log_operation.remote("get", key)
 		val = None
 		if key in self.kvstore:
 			val = self.kvstore[key]
 		return val
+
+	def log_to_string(self):
+		return self.log.to_string.remote()
 
 	# def delete(self, key):
 	# 	return self.kvstore.pop('key', None)
