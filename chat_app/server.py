@@ -10,25 +10,25 @@ ray.init()
 sys.path.insert(1, '../kv_store')
 import kv_store_replication_sn as kv_store
 
-# The set of clients connected to this server
-chats = {} #: { chat_name: {websocket: name}}
-LISTEN_ADDRESS = ('0.0.0.0', 8080)
+
+chats = {} # {chat_name: {websocket: name}}
+PORT = 8080
+LISTEN_ADDRESS = ('0.0.0.0', PORT)
 backup_server = kv_store.BackupServer.options(max_concurrency=1).remote()
 kv_store_server = kv_store.Server.options(
 	name="ServerActor", lifetime="detached", max_concurrency=10).remote(backup_server, 0)
+kv_server = ray.get_actor("ServerActor") # populate to global variable for this particular webserver
+# Store the set of clients {chat_name: {websocket: name}} connected to this server in kv-store
+# ray.get(kv_server.put.remote(PORT, {}))
 
-def timestamp_to_float(ts):
-	return int(datetime.datetime.fromtimestamp(float(ts)/1000.0).timestamp()*1000)
-
-async def client_handler(websocket, path):
+async def client_handler(websocket, path, **kwargs):
 	print('New client', websocket)
 	print(' ({} existing chats)'.format(len(chats)))
 
 	# The first two lines from the client are the name and chat name
 	name = await websocket.recv()
 	chat_name = await websocket.recv()
-	kv_server = ray.get_actor("ServerActor")
-	log = ray.get(kv_server.get.remote(chat_name))
+	log = await kv_server.get.remote(chat_name)
 
 	if not chat_name in chats:
 		chats[chat_name] = {}
@@ -38,24 +38,20 @@ async def client_handler(websocket, path):
 		len(chats[chat_name]),list(chats[chat_name].values())))
 	await websocket.send('Previous messages: {}'.format(log))
 
+	# Notify all clients in this chat of new client
 	chats[chat_name][websocket] = name
-	for client, _ in chats[chat_name].items():
-		await client.send(name + ' has joined the chat')
+	await asyncio.wait([client.send(name + ' has joined the chat') for client, _ in chats[chat_name].items()])
 
 	# Handle messages from this client
 	while True:
 		try:
 			message = await websocket.recv()
-			timestamp = await websocket.recv()
-			dt = timestamp_to_float(timestamp)
-			ray.get(kv_server.put.remote(name, message))
-			ray.get(kv_server.put.remote(chat_name, '<br>{}: {}'.format(name, message)))
-			val = ray.get(kv_server.get.remote(chat_name))
+			await kv_server.put.remote(chat_name, '<br>{}: {}'.format(name, message))
 
 			# Send message to all clients
-			for client, _ in chats[chat_name].items():
-				await client.send('{}: {}'.format(name, message))
-				# await client.send('{}: val {} ts {}'.format(name, val, dt))
+			await asyncio.wait([client.send('{}: {}'.format(name, message)) for client, _ in chats[chat_name].items()])
+			# await asyncio.wait([client.send('{}: {} - {}'.format(name, timestamp, dt)) for client, _ in chats[chat_name].items()])
+
 		except:
 			# Remove client from chat_name group
 			their_name = chats[chat_name][websocket]
@@ -65,8 +61,7 @@ async def client_handler(websocket, path):
 				await client.send(their_name + ' has left the chat')
 
 
-start_server = websockets.serve(client_handler, *LISTEN_ADDRESS, ping_interval=None)
-
+start_server = websockets.serve(client_handler, *LISTEN_ADDRESS)
 
 asyncio.get_event_loop().run_until_complete(start_server)
 asyncio.get_event_loop().run_forever()
