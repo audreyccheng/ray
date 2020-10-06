@@ -9,6 +9,8 @@ import sys
 import time
 import threading
 
+# Concurrency: 1. use async event loop or 2. use multithreading
+# Backup server can be multithreading or single actor, depending on if it is bottleneck
 @ray.remote(max_restarts=-1, max_task_retries=-1)
 class Server(object):
 	def __init__(self, backup, index):
@@ -30,7 +32,8 @@ class Server(object):
 			self.kvstore[key] += " " + value
 		else:
 			self.kvstore[key] = value
-		self.backup.put.remote(key, value)
+		# await self.backup.put.remote(key, value) by making BackupServer an AsyncActor
+		ray.get(self.backup.put.remote(key, value))
 		# print("server size: ", len(self.kvstore))
 
 	def get(self, key):
