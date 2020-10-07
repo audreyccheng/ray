@@ -7,7 +7,7 @@ import ray
 import time
 import websockets
 
-URI = 'ws://172.31.22.176:8080/'
+URI = 'ws://172.31.22.176:8080/' # Address of head node
 
 @ray.remote
 class ChatClient(object):
