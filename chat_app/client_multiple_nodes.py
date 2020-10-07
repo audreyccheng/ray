@@ -7,7 +7,7 @@ import ray
 import time
 import websockets
 
-URI = 'ws://localhost:8080/'
+URI = 'ws://172.31.22.176:8080/'
 
 @ray.remote
 class ChatClient(object):
@@ -40,10 +40,11 @@ if __name__ == "__main__":
 	parser.add_argument("--num-clients", default=2, type=int)
 	parser.add_argument("--num-clients-per-node", default=1, type=int)
 	parser.add_argument("--num-requests", default=20, type=int)
+	parser.add_argument("--chat-name", required=True, type=str)
 	args = parser.parse_args()
 	parser = argparse.ArgumentParser()
 
-	ray.init(address="auto")
+	ray.init(address='172.31.22.176:6379') # Address of head node
 
 	nodes = [node for node in ray.nodes() if node["Alive"]]
 	while len(nodes) < args.num_nodes:
@@ -86,7 +87,7 @@ if __name__ == "__main__":
 		ray.experimental.set_resource(resource, 100, node["NodeID"])
 
 	clients = [ChatClient.options(resources={client_resources[i % len(client_resources)]: 1}).remote(
-		URI, "name", "chat_name") for _ in range(args.num_clients)]
+		URI, "name", args.chat_name) for i in range(args.num_clients)]
 
 	tstart = time.time()
 	refs = []

@@ -20,7 +20,7 @@ class Server(object):
 		print("backup size: ", len(self.kvstore))
 		print("recovery time: ", tend - tstart)
 
-	def put(self, key, value):
+	async def put(self, key, value):
 		# if self.index == 0 and np.random.rand() < 0.00002:
 		# 	if not ray.get(self.backup.check_restarted.remote()):
 		# 		sys.exit()
@@ -29,16 +29,13 @@ class Server(object):
 			self.kvstore[key] += " " + value
 		else:
 			self.kvstore[key] = value
-		ray.get(self.backup.put.remote(key, value))
+		await self.backup.put.remote(key, value)
 		# print("server size: ", len(self.kvstore))
 
-	def get(self, key):
+	async def get(self, key):
 		if key in self.kvstore:
 			return self.kvstore[key]
 		return None
-
-	def size(self):
-		return len(self.kvstore)
 
 @ray.remote
 class BackupServer(object):
@@ -158,9 +155,9 @@ if __name__ == "__main__":
 
 	# server = Server.remote()
 	backup_servers = [BackupServer.options(resources={server_resources[i % len(server_resources)]: 1},
-		max_concurrency=1).remote() for i in range(args.num_servers)]
+		).remote() for i in range(args.num_servers)]
 	servers = [Server.options(resources={server_resources[i % len(server_resources)]: 1},
-		max_concurrency=1).remote(backup_servers[i], i) for i in range(args.num_servers)] # options(max_concurrency=10000).
+		).remote(backup_servers[i], i) for i in range(args.num_servers)] # options(max_concurrency=10000).
 	# client = Client.remote(servers)
 	clients = [Client.options(resources={client_resources[i % len(client_resources)]: 1}).remote(
 			servers, args.num_requests) for i in range(args.num_clients)]

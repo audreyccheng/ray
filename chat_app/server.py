@@ -2,6 +2,7 @@
 
 import asyncio
 import datetime
+import numpy as np
 import ray
 import sys
 import websockets
@@ -50,6 +51,10 @@ async def client_handler(websocket, path, **kwargs):
 
 			# Send message to all clients
 			await asyncio.wait([client.send('{}: {}'.format(name, message)) for client, _ in chats[chat_name].items()])
+			# for client, _ in chats[chat_name].items():
+			# 	await client.send('{}: {}'.format(name, message))
+			# if np.random.rand() < 0.0001:
+			# 	print(ray.get(kv_server.size.remote()))
 			# await asyncio.wait([client.send('{}: {} - {}'.format(name, timestamp, dt)) for client, _ in chats[chat_name].items()])
 
 		except:

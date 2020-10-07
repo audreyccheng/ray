@@ -41,6 +41,9 @@ class Server(object):
 			return self.kvstore[key]
 		return None
 
+	def size(self):
+		return len(self.kvstore)
+
 @ray.remote
 class BackupServer(object):
 	def __init__(self):
