@@ -15,9 +15,9 @@ import kv_store_replication_sn as kv_store
 chats = {} # {chat_name: {websocket: name}}
 PORT = 8080
 LISTEN_ADDRESS = ('0.0.0.0', PORT)
-backup_server = kv_store.BackupServer.options(max_concurrency=1).remote()
+backup_servers = [kv_store.BackupServer.options(max_concurrency=1).remote() for _ in range(3)]
 kv_store_server = kv_store.Server.options(
-	name="ServerActor", lifetime="detached", max_concurrency=10).remote(backup_server, 0)
+	name="ServerActor", lifetime="detached", max_concurrency=10).remote(backup_servers, 0)
 kv_server = ray.get_actor("ServerActor") # populate to global variable for this particular webserver
 # Store the set of clients {chat_name: {websocket: name}} connected to this server in kv-store
 # ray.get(kv_server.put.remote(PORT, {}))

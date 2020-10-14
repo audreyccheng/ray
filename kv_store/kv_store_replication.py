@@ -11,14 +11,27 @@ import threading
 
 @ray.remote(max_restarts=-1, max_task_retries=-1)
 class Server(object):
-	def __init__(self, backup, index):
-		tstart = time.time()
-		self.backup = backup
-		self.kvstore = ray.get(backup.restore_primary.remote())
+	def __init__(self, backups, index):
+		# tstart = time.time()
+		# self.backup = backup
+		# self.kvstore = ray.get(backup.restore_primary.remote())
+		# self.index = index
+		# tend = time.time()
+		# print("backup size: ", len(self.kvstore))
+		# print("recovery time: ", tend - tstart)
+		self.backups = backups
+		# choose random backup to restore state from
+		backup = self.backups[randrange(len(self.backups))]
+		if ray.get(backup.size.remote()) > 0:
+			tstart = time.time()
+			self.kvstore = ray.get(backup.restore_primary.remote())
+			tend = time.time()
+			print("backup size: ", len(self.kvstore))
+			print("recovery time: ", tend - tstart)
+		else:
+			self.kvstore = {}
 		self.index = index
-		tend = time.time()
-		print("backup size: ", len(self.kvstore))
-		print("recovery time: ", tend - tstart)
+		self.puts = 0
 
 	def put(self, key, value):
 		# if self.index == 0 and np.random.rand() < 0.00002:
@@ -29,8 +42,12 @@ class Server(object):
 			self.kvstore[key] += " " + value
 		else:
 			self.kvstore[key] = value
-		ray.get(self.backup.put.remote(key, value))
+		# ray.get(self.backup.put.remote(key, value))
 		# print("server size: ", len(self.kvstore))
+		# refs = []
+		# for backup in self.backups:
+		# 	refs.append(backup.put.remote(key, value))
+		ray.get([backup.put.remote(key, value) for backup in self.backups])
 
 	def get(self, key):
 		if key in self.kvstore:
@@ -67,6 +84,9 @@ class BackupServer(object):
 		if self.restart_count == 5:
 			self.restarted = True
 		return self.kvstore
+
+	def size(self):
+		return len(self.kvstore)
 	
 @ray.remote(num_cpus=0)
 class Client(object):
@@ -92,6 +112,7 @@ if __name__ == "__main__":
 	parser.add_argument("--num-servers-per-node", default=1, type=int)
 	parser.add_argument("--num-requests", default=10000, type=int)
 	parser.add_argument("--num-nodes", required=True, type=int)
+	parser.add_argument("--num-replicas-per-server", default=1, type=int)
 	args = parser.parse_args()
 	parser = argparse.ArgumentParser()
 
@@ -128,6 +149,8 @@ if __name__ == "__main__":
 	nodes.remove(head_node[0])
 
 	client_resources = ["client:{}".format(i) for i in range(args.num_clients // args.num_clients_per_node)]
+	# backup_server_resources = ["backup server:{}".format(i) for i in range(
+	# 	args.num_servers * args.num_replicas_per_server // args.num_servers_per_node)]
 	server_resources = ["server:{}".format(i) for i in range(args.num_servers // args.num_servers_per_node)]
 	owner_ip = None
 	owner_resource = None
@@ -148,8 +171,8 @@ if __name__ == "__main__":
 	# 	print("Assigning", resource, "to node", node["NodeID"], node["Resources"])
 	# 	ray.experimental.set_resource(resource, 100, node["NodeID"])
 
-	assert len(nodes) >= len(client_resources) + len(server_resources)
-	for node, resource in zip(nodes, client_resources + server_resources):
+	assert len(nodes) >= len(client_resources) + len(server_resources) # + len(backup_server_resources)
+	for node, resource in zip(nodes, client_resources + server_resources): # + backup_server_resources):
 		if "CPU" not in node["Resources"]:
 			continue
 
@@ -157,10 +180,14 @@ if __name__ == "__main__":
 		ray.experimental.set_resource(resource, 100, node["NodeID"])
 
 	# server = Server.remote()
-	backup_servers = [BackupServer.options(resources={server_resources[i % len(server_resources)]: 1},
-		max_concurrency=1).remote() for i in range(args.num_servers)]
-	servers = [Server.options(resources={server_resources[i % len(server_resources)]: 1},
-		max_concurrency=1).remote(backup_servers[i], i) for i in range(args.num_servers)] # options(max_concurrency=10000).
+	# backup_servers = [BackupServer.options(resources={server_resources[i % len(server_resources)]: 1},
+	# 	max_concurrency=1).remote() for i in range(args.num_servers)]
+	# servers = [Server.options(resources={server_resources[i % len(server_resources)]: 1},
+	# 	max_concurrency=1).remote(backup_servers[i], i) for i in range(args.num_servers)] # options(max_concurrency=10000).
+	backup_servers = [BackupServer.options(max_concurrency=1, resources={server_resources[i % len(server_resources)]: 1},).remote(
+		) for i in range(args.num_servers * args.num_replicas_per_server)]
+	servers = [Server.options(max_concurrency=10, resources={server_resources[i % len(server_resources)]: 1},).remote(
+		backup_servers[i:i + args.num_replicas_per_server], i) for i in range(args.num_servers)]
 	# client = Client.remote(servers)
 	clients = [Client.options(resources={client_resources[i % len(client_resources)]: 1}).remote(
 			servers, args.num_requests) for i in range(args.num_clients)]
