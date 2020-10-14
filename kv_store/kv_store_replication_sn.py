@@ -13,14 +13,20 @@ import threading
 # Backup server can be multithreading or single actor, depending on if it is bottleneck
 @ray.remote(max_restarts=-1, max_task_retries=-1)
 class Server(object):
-	def __init__(self, backup, index):
-		tstart = time.time()
-		self.backup = backup
-		self.kvstore = ray.get(backup.restore_primary.remote())
+	def __init__(self, backups, index):
+		self.backups = backups
+		# choose random backup to restore state from
+		backup = self.backups[randrange(len(self.backups))]
+		if ray.get(backup.size.remote()) > 0:
+			tstart = time.time()
+			self.kvstore = ray.get(backup.restore_primary.remote())
+			tend = time.time()
+			print("backup size: ", len(self.kvstore))
+			print("recovery time: ", tend - tstart)
+		else:
+			self.kvstore = {}
 		self.index = index
-		tend = time.time()
-		print("backup size: ", len(self.kvstore))
-		print("recovery time: ", tend - tstart)
+		self.puts = 0
 
 	def put(self, key, value):
 		# if self.index == 0 and np.random.rand() < 0.00001: #len(self.kvstore) > 5000:
@@ -32,8 +38,23 @@ class Server(object):
 			self.kvstore[key] += " " + value
 		else:
 			self.kvstore[key] = value
+		ray.get([backup.put.remote(key, value) for backup in self.backups])
+		# self.put += 1
 		# await self.backup.put.remote(key, value) by making BackupServer an AsyncActor
-		ray.get(self.backup.put.remote(key, value))
+		# ray.get(self.backup.put.remote(key, value))
+		# refs = []
+		# for backup in self.backups:
+		# 	refs.append(backup.put.remote(key, value))
+		# ray.get(refs)
+		# if not self.put % 10000:
+		# 	max_size = 0
+		# 	sizes = []
+		# 	for i in range(len(self.backups)):
+		# 		size = ray.get(self.backups[i].size.remote())
+		# 		if size > max_size:
+		# 			max_size = size
+		# 		sizes.append(size)
+
 		# print("server size: ", len(self.kvstore))
 
 	def get(self, key):
@@ -71,6 +92,9 @@ class BackupServer(object):
 		if self.restart_count == 2:
 			self.restarted = True
 		return self.kvstore
+
+	def size(self):
+		return len(self.kvstore)
 	
 @ray.remote(num_cpus=0)
 class Client(object):
@@ -82,7 +106,7 @@ class Client(object):
 		rand_val = np.random.rand()
 		rand_server = randrange(len(self.servers))
 		if rand_val < 0.5:
-			return await self.servers[rand_server].put.remote(randrange(self.num_requests), rand_val)
+			return await self.servers[rand_server].put.remote(randrange(self.num_requests), str(rand_val))
 		else:
 			return await self.servers[rand_server].get.remote(randrange(self.num_requests))
 
@@ -95,14 +119,15 @@ if __name__ == "__main__":
 	parser.add_argument("--num-clients-per-node", default=1, type=int)
 	parser.add_argument("--num-servers-per-node", default=1, type=int)
 	parser.add_argument("--num-requests", default=10000, type=int)
+	parser.add_argument("--num-replicas-per-server", default=1, type=int)
 	args = parser.parse_args()
 	parser = argparse.ArgumentParser()
 
 	ray.init()
 
 	# server = Server.remote()
-	backup_servers = [BackupServer.options(max_concurrency=1).remote() for i in range(args.num_servers)]
-	servers = [Server.options(max_concurrency=10).remote(backup_servers[i], i) for i in range(args.num_servers)] # options(max_concurrency=10000).
+	backup_servers = [BackupServer.options(max_concurrency=1).remote() for i in range(args.num_servers * args.num_replicas_per_server)]
+	servers = [Server.options(max_concurrency=10).remote(backup_servers[i:i+args.num_replicas_per_server], i) for i in range(args.num_servers)] # options(max_concurrency=10000).
 	# client = Client.remote(servers)
 	clients = [Client.remote(servers, args.num_requests) for i in range(args.num_clients)]
 
