@@ -23,6 +23,8 @@ async def client_handler(websocket, path):
 	print('New client', websocket)
 	print(' ({} existing chats)'.format(len(chats)))
 
+	# TODO: IF SERVER ACTOR PROCESS DIES, CREATE NEW SERVER ACTOR.
+
 	# The first two lines from the client are the name and chat name
 	name = await websocket.recv()
 	chat_name = await websocket.recv()
@@ -51,7 +53,7 @@ async def client_handler(websocket, path):
 			ray.get(kv_server.put.remote(chat_name, '<br>{}: {}'.format(name, message)))
 			val = ray.get(kv_server.get.remote(chat_name))
 			log = ray.get(kv_server.log_to_string.remote())
-			print("log" + log)
+			print("log: [{}]".format(log))
 			# Send message to all clients
 			for client, _ in chats[chat_name].items():
 				await client.send('{}: {}'.format(name, message))
