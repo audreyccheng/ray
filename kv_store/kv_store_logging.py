@@ -3,9 +3,10 @@ from collections import Counter, defaultdict
 import heapq
 import numpy as np
 import os
-from random import randrange
+import random
 import ray
 from ray.serve.kv_store import RayInternalKVStore
+import sys
 import time
 
 @ray.remote
@@ -25,10 +26,14 @@ class Log(object):
 		else:
 			raise ValueError("op must be 'put' or 'get'. 'put' operations must have a non-null value.")
 		# Todo: What if server fails here? (prior to persisting the log)
-		self.save_checkpoint()
+		self.persist()
 
-	def save_checkpoint(self):
-		self.store.put("checkpoint", self.to_string().encode())
+	def persist(self):
+		self.store.put("persist_log", 
+				self.to_string().encode())
+
+	def get_log(self):
+		return self.store.get("persist_log")
 
 	def to_string(self):
 		log_entries = [x.to_string() for x in self.log]
@@ -44,7 +49,7 @@ class PutRecord(object):
 	def get_value(self):
 		return self.value
 	def to_string(self):
-		return "put {} -> {}".format(self.key, self.value)
+		return "put {} {}".format(self.key, self.value)
 
 class GetRecord(object):
 	def __init__(self, k):
@@ -54,25 +59,49 @@ class GetRecord(object):
 	def to_string(self):
 		return "get {}".format(self.key)
 
-@ray.remote
+@ray.remote(max_restarts=-1, max_task_retries=-1)
 class Server(object):
 	def __init__(self):
 		self.kvstore = {}
 		self.log = Log.remote()
+		self.restore_from_log()
+		print("Server actor PID is: {}".format(os.getpid()))
 
 	def put(self, key, value):
-		self.log.log_operation.remote("put", key, value)
+		ray.get(self.log.log_operation.remote("put", key, value))
 		self.kvstore[key] = value
+		# Simulating failure w/ probability 10%
+		if random.randint(1, 100) <= 10:
+			print("simulated SERVER FAILURE ON PUT")
+			sys.exit()
 
 	def get(self, key):
-		self.log.log_operation.remote("get", key)
+		ray.get(self.log.log_operation.remote("get", key))
 		val = None
 		if key in self.kvstore:
 			val = self.kvstore[key]
 		return val
 
 	def log_to_string(self):
-		return self.log.to_string.remote()
+		return ray.get(self.log.to_string.remote())
+
+	def restore_from_log(self):
+		string_log = ray.get(self.log.get_log.remote())
+		# If there is no persisted log, exit.
+		if not string_log:
+			return
+		# For debugging
+		print("restoring log: [{}]".format(string_log))
+		log_items = string_log.split(", ")
+		for l in log_items:
+			if l[0] == "p":
+				to_put = l.split()[1:] # parse key and value
+				self.put(to_put[0], to_put[1]) # assume all string vals
+			elif l[0] == "g":
+				to_get = l.split()[1] # parse key
+				self.get(to_get)
+			else:
+				raise ValueError("Invalid log item {}".format(l))
 
 	# def delete(self, key):
 	# 	return self.kvstore.pop('key', None)
