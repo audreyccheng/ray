@@ -1,7 +1,9 @@
 import random
-import ray 
+import ray
 import time
 from uhashring import HashRing
+import sys
+import os
 
 class ActorClass(object):
 	def __init__(self):
@@ -31,24 +33,58 @@ class PhysicalActor(object):
 		# Execute function on virtual actor
 		return getattr(self.virtual_actors[key], method_name)(*args)
 
-@ray.remote
+@ray.remote(max_restarts=-1, max_task_retries=-1)
 class VirtualActorGroup(object):
 	def __init__(self, num_physical_actors):
 		# Key: string (name of virtual actor), value: physical actor
 		self.actor_handles = {}
 		self.physical_actor_names = ["PhysicalActor-" + str(i) for i in range(num_physical_actors)]
-		# Allocate physical actors during construction for now, autoscaling for later
-		self.physical_actors = [PhysicalActor.options(name=actor_name).remote(
-			) for actor_name in self.physical_actor_names]
-		self.hash_ring = HashRing(nodes=self.physical_actor_names)
+		self.log = "log.txt"
+		# Check if this is a clean start
+		if not os.path.exists(self.log):
+			# Create log file if it doesn't exist
+			with open(self.log, 'w'): pass
+			# Allocate physical actors during construction for now, autoscaling for later
+			self.physical_actors = [PhysicalActor.options(name=actor_name, lifetime="detached").remote(
+				) for actor_name in self.physical_actor_names]
+		else:
+			# Get running physical actors
+			self.physical_actors = []
+			for actor in self.physical_actor_names:
+				self.physical_actors.append(ray.get_actor(actor))
+			# Read in actor handle mappings from log
+			log = open(self.log,"r")
+			line = log.readline()
+			while line:
+				mapping = line.split(":")
+				# Check that mapping is in format key:physical-actor-name
+				if len(mapping) == 2 and mapping[1] in self.physical_actor_names:
+					actor_index = self.physical_actor_names.index(mapping[1])
+					self.actor_handles[mapping[0]] = self.physical_actors[actor_index]
+				line = log.readline()
+			log.close()
+		self.hash_ring = HashRing(nodes=self.physical_actors)
+		self.count = 0
 
 	# Return physical actor corresponding to the key of a virtual actor instance
 	# Allocate key to physical actor if it is not yet assigned
 	def get_physical_actor(self, key):
+		self.count += 1
+		if self.count == -1: # Set number to trigger failure
+			sys.exit()
 		if not key in self.actor_handles:
 			physical_actor = self.hash_ring.get_node(key)
 			self.actor_handles[key] = physical_actor
-		return self.actor_handles[key]
+			actor_index = self.physical_actors.index(physical_actor)
+			actor_name = self.physical_actor_names[actor_index]
+			log = open(self.log, "a")
+			log.write(key + ":" + actor_name + "\n")
+			log.close()
+		return [self.actor_handles[key]]
+
+	# Remove log file when closing master
+	def close(self):
+		os.remove(self.log)
 
 
 @ray.remote
@@ -58,12 +94,14 @@ class Client:
 		self.key = "client-" + str(random.randrange(100))
 		self.master = master
 		self.actor_class = actor_class
-		self.actor_name = ray.get(master.get_physical_actor.remote(self.key))
-		self.actor = ray.get_actor(self.actor_name)
-		# self.actor =  ray.get(master.get_physical_actor.remote(self.key))
+		# Cache physical actor so that master only needs to be contacted once
+		self.actor = ray.get(master.get_physical_actor.remote(self.key))[0]
 
 	def send_request(self, method_name, *args):
 		return ray.get(self.actor.execute_task.remote(self.actor_class, self.key, method_name, *args))
+
+def str_to_class(classname):
+		return getattr(sys.modules[__name__], classname)
 
 if __name__ == "__main__":
 	ray.init()
@@ -77,4 +115,7 @@ if __name__ == "__main__":
 	for client in clients:
 		refs += [client.send_request.remote("foo", 1)]
 	print(ray.get(refs))
+
+	ray.get(virtual_actor_group.close.remote())
+	
 
