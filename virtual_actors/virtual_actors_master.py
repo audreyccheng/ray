@@ -36,7 +36,7 @@ class PhysicalActor(object):
 @ray.remote(max_restarts=-1, max_task_retries=-1)
 class VirtualActorGroup(object):
 	def __init__(self, num_physical_actors):
-		# Key: string (name of virtual actor), value: physical actor
+		# Key: string (name of virtual actor), value: physical actor handle
 		self.actor_handles = {}
 		self.physical_actor_names = ["PhysicalActor-" + str(i) for i in range(num_physical_actors)]
 		self.log = "log.txt"
@@ -99,9 +99,6 @@ class Client:
 
 	def send_request(self, method_name, *args):
 		return ray.get(self.actor.execute_task.remote(self.actor_class, self.key, method_name, *args))
-
-def str_to_class(classname):
-		return getattr(sys.modules[__name__], classname)
 
 if __name__ == "__main__":
 	ray.init()
