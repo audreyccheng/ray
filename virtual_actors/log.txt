@@ -1,3 +1,0 @@
-client-8:PhysicalActor-1
-client-4:PhysicalActor-1
-client-10:PhysicalActor-0

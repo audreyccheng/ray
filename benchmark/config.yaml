@@ -3,16 +3,16 @@ cluster_name: ray_kv_store
 
 # The minimum number of workers nodes to launch in addition to the head
 # node. This number should be >= 0.
-min_workers: 9
+min_workers: 17
 
 # The maximum number of workers nodes to launch in addition to the head
 # node. This takes precedence over min_workers.
-max_workers: 9
+max_workers: 17
 
 # The initial number of worker nodes to launch in addition to the head
 # node. When the cluster is first brought up (or when it is refreshed with a
 # subsequent `ray up`) this number of nodes will be started.
-initial_workers: 9
+initial_workers: 17
 
 # Whether or not to autoscale aggressively. If this is enabled, if at any point
 #   we would start more workers, we start at least enough to bring us to
@@ -52,7 +52,7 @@ auth:
 # For more documentation on available fields, see:
 # http://boto3.readthedocs.io/en/latest/reference/services/ec2.html#EC2.ServiceResource.create_instances
 head_node:
-    InstanceType: m5.16xlarge
+    InstanceType: m5.8xlarge
     ImageId: ami-0764eacdf56f1b2bc
     # Additional options in the boto docs.
 
@@ -61,7 +61,7 @@ head_node:
 # For more documentation on available fields, see:
 # http://boto3.readthedocs.io/en/latest/reference/services/ec2.html#EC2.ServiceResource.create_instances
 worker_nodes:
-    InstanceType: m5.16xlarge # p3.16xlarge #
+    InstanceType: m5.8xlarge # p3.16xlarge #
     ImageId: ami-0764eacdf56f1b2bc
 
     # InstanceMarketOptions:
@@ -73,6 +73,7 @@ file_mounts:
     /home/ubuntu/ray/benchmarks: /Users/accheng/Documents/ray_notebooks/ray/benchmark  
     /home/ubuntu/ray/kv_store: /Users/accheng/Documents/ray_notebooks/ray/kv_store
     /home/ubuntu/ray/chat_app: /Users/accheng/Documents/ray_notebooks/ray/chat_app
+    /home/ubuntu/ray/virtual_actors: /Users/accheng/Documents/ray_notebooks/ray/virtual_actors
     # /Users/audrey/ray_notebooks/ray/benchmark 
     # /home/swang/audrey-benchmarks
     # /home/ubuntu/husky.mp4: /home/swang/data/husky.mp4
@@ -92,11 +93,13 @@ setup_commands:
 head_setup_commands:
     - pip install boto3==1.4.8  # 1.4.8 adds InstanceMarketOptions
     - pip install websockets
+    - pip install uhashring
     - source activate tensorflow_p36 && pip install boto3==1.4.8  # 1.4.8 adds InstanceMarketOptions
 
 # Custom commands that will be run on worker nodes after common setup.
 worker_setup_commands: 
     - pip install websockets
+    - pip install uhashring
 
 # Command to start ray on the head node. You don't need to change this.
 head_start_ray_commands:

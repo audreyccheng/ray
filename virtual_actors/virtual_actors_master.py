@@ -35,19 +35,22 @@ class PhysicalActor(object):
 
 @ray.remote(max_restarts=-1, max_task_retries=-1)
 class VirtualActorGroup(object):
-	def __init__(self, num_physical_actors):
+	def __init__(self, num_physical_actors, physical_resources):
 		# Key: string (name of virtual actor), value: physical actor handle
 		self.actor_handles = {}
 		self.physical_actor_names = ["PhysicalActor-" + str(i) for i in range(num_physical_actors)]
 		self.log = "log.txt"
+		self.failed = False
 		# Check if this is a clean start
 		if not os.path.exists(self.log):
 			# Create log file if it doesn't exist
 			with open(self.log, 'w'): pass
 			# Allocate physical actors during construction for now, autoscaling for later
-			self.physical_actors = [PhysicalActor.options(name=actor_name, lifetime="detached").remote(
-				) for actor_name in self.physical_actor_names]
+			self.physical_actors = [PhysicalActor.options(name=self.physical_actor_names[i], lifetime="detached",
+				resources={physical_resources[i % len(physical_resources)]: 1}).remote(
+				) for i in range(len(self.physical_actor_names))]
 		else:
+			self.failed = True
 			# Get running physical actors
 			self.physical_actors = []
 			for actor in self.physical_actor_names:
@@ -70,11 +73,12 @@ class VirtualActorGroup(object):
 	# Allocate key to physical actor if it is not yet assigned
 	def get_physical_actor(self, key):
 		self.count += 1
-		if self.count == -1: # Set number to trigger failure
+		if self.count == -1 and not self.failed: # Set number to trigger failure
 			sys.exit()
 		if not key in self.actor_handles:
 			physical_actor = self.hash_ring.get_node(key)
 			self.actor_handles[key] = physical_actor
+			# Write corresponding actor name to disk
 			actor_index = self.physical_actors.index(physical_actor)
 			actor_name = self.physical_actor_names[actor_index]
 			log = open(self.log, "a")
@@ -87,6 +91,8 @@ class VirtualActorGroup(object):
 		os.remove(self.log)
 
 
+# General client class that will send requests for 
+# specified actor_class
 @ray.remote
 class Client:
 	def __init__(self, master, actor_class):
