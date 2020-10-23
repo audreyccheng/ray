@@ -10,43 +10,39 @@ import websockets
 import virtual_actors_master as va
 
 class ChatGroup(object):
-	def __init__(self):
-		pass
-
-	def setup(self, chat_group_name):
+	def __init__(self, chat_group_name):
 		self.chat_group_name = chat_group_name
+		# Store name of clients as strings
 		self.clients = []
-
-	def add_client(self, client):
-		self.clients.append(client)
+		# Pass in name of master of chat clients
+		self.va_client = va.Client("chat_clients")
 
 	def send_chat(self, chat, sending_client):
-		# refs = []
-		# for client in self.clients:
-		# 	if client != sending_client:
-		# 		refs += [client.recieve_chat.remote(chat)]
-		# ray.get(refs)
-		# [client.recieve_chat.remote(chat) for client in self.clients]
+		if not sending_client in self.clients:
+			self.clients.append(sending_client)
 		for client in self.clients:
-			client.send_request.remote("recieve_chat", chat)
+			self.va_client.push_chat(client, "chat")
+			# client.send_request.remote("recieve_chat", chat)
 			# client.recieve_chat.remote(chat)
 
 class ChatClient(object):
-	def __init__(self):
-		pass
-
-	def setup(self, name, chat_group):
-		self.name = name
-		self.chat_group = chat_group
+	def __init__(self, client_name):
+		self.client_name = client_name
 		self.chat = ""
+		# Pass in name of master of chat groups
+		self.va_client = va.Client("chat_rooms")
 
-	def send_chat(self, chat):
-		self.chat += chat
-		self.chat_group.send_request.remote("send_chat", chat, self)
+	def send_chat_group(self, chat_group, chat):
+		# self.chat += chat
+		self.va_client.send_chat(chat_group, chat, self.client_name)
+		# self.chat_group.send_request.remote("send_chat", chat, self)
 		# return chat
 
-	def recieve_chat(self, chat):
+	def push_chat(self, chat):
 		self.chat += chat
+
+	def get_chat(self):
+		return self.chat
 
 
 
@@ -62,27 +58,30 @@ if __name__ == "__main__":
 
 	ray.init()
 
-	virtual_actor_group = va.VirtualActorGroup.options(
-		name="VirtualActorGroup", lifetime="detached").remote(2)
+	chat_room_master = va.VirtualActorGroup.options(
+		name="chat_rooms", lifetime="detached").remote(1, ChatGroup)
 
-	# chat_group = ChatGroup.remote("chat_group")
-	# clients = [ChatClient.remote("client-" + str(i), chat_group) for i in range(args.num_clients)]
-	chat_group = va.Client.options(max_concurrency=1).remote(virtual_actor_group, ChatGroup)
-	chat_clients = [va.Client.options(max_concurrency=1).remote(virtual_actor_group, ChatClient) for _ in range(args.num_clients)]
+	chat_client_master = va.VirtualActorGroup.options(
+		name="chat_clients", lifetime="detached").remote(1, ChatClient)
 
-	ray.get(chat_group.send_request.remote("setup", "chat_group"))
-	ray.get([client.send_request.remote("setup", "client", chat_group) for client in chat_clients])
+	# Name of chat clients
+	clients = ["client" + str(i) for i in range(args.num_clients)]
 
-
+	# Start virtual actor client to make requests
+	chat_clients = va.Client("chat_clients")
+	# Make sure all actors have been started
+	ray.get([chat_clients.send_chat_group(client, "group", "chat" + client) for client in clients])
 	tstart = time.time()
-	refs = []
+	reqs = []
 	num_requests = args.num_requests // args.num_clients
-	for client in chat_clients:
-		for _ in range(num_requests):
-			refs += [client.send_request.remote("send_chat", "hello")]
-	ray.get(refs)
+	for _ in range(num_requests):
+		reqs += [chat_clients.send_chat_group(client, "group", "chat" + client) for client in clients]
+	ray.get(reqs)
 	tstop = time.time()
+	# time.sleep(5)
+	# print(ray.get([chat_clients.get_chat(client) for client in clients]))
+	
 	print("time: ", tstop-tstart)
 	print("throughput: ", args.num_requests / (tstop-tstart))
 
-	ray.get(virtual_actor_group.close.remote())
+	# ray.get(virtual_actor_group.close.remote())
