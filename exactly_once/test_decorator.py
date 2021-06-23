@@ -150,7 +150,8 @@ class Client(object):
 	def run_op(self):
 		# rand_key = "key" #str(np.random.rand())
 		request_start = time.time()
-		rand_val = np.random.rand()
+		# rand_val = np.random.rand()
+		rand_val = 1
 		request_id = str(self.client_id) + ":" + str(self.request_count)
 		self.request_count += 1
 		self.requests[request_id] = (rand_val, 0)

@@ -39,7 +39,7 @@ def exactly_once_init(exactly_once, filename):
 						# 	time.sleep(0.1)
 							# self.value = float(vals[2])
 						# else:
-						# 	self.replay(vals[1])
+							self.replay(vals[1])
 							# self.value += float(vals[1])
 						count += 1
 					print("Total lines read: ", count)
@@ -112,7 +112,7 @@ def exactly_once_method(checkpoint_freq, exactly_once, filename):
 
 @ray.remote(max_restarts=-1, max_task_retries=-1)
 class Server(object):
-	@exactly_once_init(exactly_once=True, filename="server_checkpoint.txt")
+	@exactly_once_init(exactly_once=False, filename="server_checkpoint.txt")
 	def __init__(self, control_actor, large_write, long_compute, no_control):
 		self.control_actor = control_actor
 		self.control_actor.receive_server_msg.remote(os.getpid())
@@ -122,8 +122,9 @@ class Server(object):
 		self.long_compute = long_compute
 		self.no_control = no_control
 
-	@exactly_once_method(checkpoint_freq=1, exactly_once=True, filename="server_checkpoint.txt")
+	@exactly_once_method(checkpoint_freq=1, exactly_once=False, filename="server_checkpoint.txt")
 	def decorated_add(self, request_id, value, request_start):
+		# print('got client request')
 		self.value += float(value)
 		# print("server computed value: ", self.value)
 		self.latencies.append(time.time() - request_start)
@@ -151,11 +152,13 @@ class Server(object):
 
 @ray.remote(max_restarts=1, max_task_retries=1)
 class Client(object):
-	def __init__(self, client_id, server):
+	def __init__(self, client_id, server, request_rate, batch_size):
 		self.client_id = client_id
 		self.server = server
 		self.request_count = 0
 		self.requests = {} # k: request_id, v: (value, final value)
+		self.batch_interval = 1 / request_rate
+		self.batch_size = batch_size
 
 	def run_op(self):
 		# rand_key = "key" #str(np.random.rand())
@@ -165,6 +168,34 @@ class Client(object):
 		self.request_count += 1
 		self.requests[request_id] = (rand_val, 0)
 		return self.server.decorated_add.remote(request_id, rand_val, request_start)
+
+	def run_batches(self, num_batches):
+		results = []
+		start = time.time()
+		next_batch = start
+		for i in range(num_batches):
+			# diff = next_batch - time.time()
+			# if diff > 0:
+			# 	print("diff ", diff)
+			# 	time.sleep(diff)
+
+			request_start = time.time()
+			rand_val = np.random.rand()
+			request_id = str(self.client_id) + ":" + str(self.request_count)
+			self.request_count += 1
+			self.requests[request_id] = (rand_val, 0)
+			ref = self.server.decorated_add.remote(request_id, rand_val, request_start)
+			# print('sent client request ', self.request_count)
+			results.append(ref)
+		
+			# print("len results ", len(results))
+			if i % 2 == 0 and len(results) >= self.batch_size * 4:
+				done_ids, results = ray.wait(results, num_returns=len(results) // 2)
+				# print(len(results))
+			next_batch += self.batch_interval
+
+		return ray.get(results)
+
 
 @ray.remote
 class ControlActor(object):
@@ -186,7 +217,7 @@ class ControlActor(object):
 		# print("Got server msg from ", pid)
 		# self.server_requests += 1
 		if not self.failed:
-			time.sleep(8)  #1 #(1.05)
+			time.sleep(3) #3) 4) #8)  #1 #(1.05)
 			self.latencies += ray.get(self.server.get_latencies.remote())
 			os.kill(pid, signal.SIGKILL)
 		self.failed = True
@@ -229,6 +260,8 @@ if __name__ == "__main__":
 	parser.add_argument("--large-write", action="store_true")
 	parser.add_argument("--long-compute", action="store_true")
 	parser.add_argument("--no-control", action="store_true")
+	parser.add_argument("--batch-rate", default=20, type=int)
+	parser.add_argument("--batch-size", required=True, type=int)
 	args = parser.parse_args()
 	parser = argparse.ArgumentParser()
 
@@ -237,13 +270,15 @@ if __name__ == "__main__":
 	control = ControlActor.remote(args.fail, args.fail_after)
 	server = Server.remote(control, args.large_write, args.long_compute, args.no_control)
 	ray.get(control.set_server.remote(server))
-	clients = [Client.remote(i, server) for i in range(args.num_clients)]
+	clients = [Client.remote(i, server, args.batch_rate, args.batch_size) for i in range(args.num_clients)]
 
 	tstart = time.time()
 	refs = []
 	for client in clients:
-		refs += [client.run_op.remote() for _ in range(args.num_requests // args.num_clients)]
-	results = ray.get(ray.get(refs))
+		refs += [client.run_batches.remote(args.num_requests // args.num_clients)]
+		# refs += [client.run_op.remote() for _ in range(args.num_requests // args.num_clients)]
+	# results = ray.get(ray.get(refs))
+	results = ray.get(refs)
 	tend = time.time()
 	print("time: ", tend - tstart)
 	print("throughput: ", args.num_requests / (tend - tstart))
@@ -259,7 +294,7 @@ if __name__ == "__main__":
 	# print("done")
 	# print("final values: ", results)
 
-	# os.remove(os.path.join(os.path.dirname(os.path.realpath(__file__)), "server_checkpoint.txt"))
+	os.remove(os.path.join(os.path.dirname(os.path.realpath(__file__)), "server_checkpoint.txt"))
 	# os.remove(os.path.join(os.path.dirname(os.path.realpath(__file__)), "private_server_checkpoint.txt"))
 
 
