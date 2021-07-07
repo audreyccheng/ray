@@ -43,6 +43,7 @@ class TrainableUtil:
             raise ValueError("Returned unexpected type {}. "
                              "Expected str or dict.".format(type(checkpoint)))
 
+        logger.info("MMMMMMMMMMM TrainableUtil process_checkpoint dumping to disk")
         with open(checkpoint_path + ".tune_metadata", "wb") as f:
             trainable_state["saved_as_dict"] = saved_as_dict
             pickle.dump(trainable_state, f)
@@ -70,6 +71,8 @@ class TrainableUtil:
 
     @staticmethod
     def checkpoint_to_object(checkpoint_path):
+        logger.info("GGGGGGGGGGGGGGG checkpoint_to_object TrainableUtil")
+        logger.info("JJJJJJJJJJJJJJ checkpoint_to_object TrainableUtil")
         data_dict = TrainableUtil.pickle_checkpoint(checkpoint_path)
         out = io.BytesIO()
         if len(data_dict) > 10e6:  # getting pretty large

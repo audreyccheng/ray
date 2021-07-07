@@ -844,6 +844,8 @@ class TrialRunner:
         # the scheduler decision is STOP or PAUSE. Note that
         # PAUSE only checkpoints to memory and does not update
         # the global checkpoint state.
+        # print("IIIIIIIIIIIIIIII trial_runner force_checkpoint ", force_checkpoint)
+        # logger.info(os.getpid())
         self._checkpoint_trial_if_needed(trial, force=force_checkpoint)
 
         if trial.is_saving:
@@ -1023,11 +1025,14 @@ class TrialRunner:
             raise ValueError("Invalid decision: {}".format(decision))
 
     def _checkpoint_trial_if_needed(self, trial, force=False):
+        # logger.info("DDDDDDDDDDDD _checkpoint_trial_if_needed")
         """Checkpoints trial based off trial.last_result."""
         if trial.should_checkpoint() or force:
             # Save trial runtime if possible.
             if trial.runner:
+                # logger.info("1----DDDDDDDDDDDD _checkpoint_trial_if_needed")
                 self.trial_executor.save(trial, storage=Checkpoint.PERSISTENT)
+        # pass
 
     def _try_recover(self, trial, error_msg):
         """Tries to recover trial.

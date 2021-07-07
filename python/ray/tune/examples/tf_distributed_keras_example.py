@@ -11,6 +11,7 @@ from ray.tune.schedulers import AsyncHyperBandScheduler
 from ray.tune.integration.keras import TuneReportCheckpointCallback
 from ray.tune.integration.tensorflow import (DistributedTrainableCreator,
                                              get_num_workers)
+import time
 
 
 def mnist_dataset(batch_size, mini=False):
@@ -83,7 +84,7 @@ if __name__ == "__main__":
         "--num-cpus-per-worker",
         "-c",
         type=int,
-        default=2,
+        default=1,
         help="number of CPUs for this worker")
     parser.add_argument(
         "--num-gpus-per-worker",
@@ -117,21 +118,25 @@ if __name__ == "__main__":
 
     sched = AsyncHyperBandScheduler(max_t=400, grace_period=20)
 
+    tstart = time.time()
     analysis = tune.run(
         tf_trainable,
+        checkpoint_freq=0,
         name="exp",
         scheduler=sched,
         metric="mean_accuracy",
         mode="max",
         stop={
             "mean_accuracy": 0.99,
-            "training_iteration": 10
+            "training_iteration": 100
         },
         num_samples=1,
         config={
             "use_mini": args.smoke_test,
-            "lr": tune.uniform(0.001, 0.1),
+            "lr": tune.uniform(0.001, 0.2),
             "momentum": tune.uniform(0.1, 0.9),
             "hidden": tune.randint(32, 512),
         })
+    tend = time.time()
     print("Best hyperparameters found were: ", analysis.best_config)
+    print("Total time: ", tend - tstart)

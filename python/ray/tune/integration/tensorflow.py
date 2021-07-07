@@ -98,6 +98,7 @@ class _TensorFlowTrainable(DistributedTrainable):
         return result
 
     def save_checkpoint(self, checkpoint_dir: str) -> str:
+        logger.info("AAAAAAAAAAAAAAA save_checkpoint in TensorFlow")
         # TODO: optimize if colocated
         save_obj = ray.get(self.workers[0].save_to_object.remote())
         checkpoint_path = TrainableUtil.create_from_pickle(

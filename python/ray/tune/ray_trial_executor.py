@@ -944,13 +944,20 @@ class RayTrialExecutor(TrialExecutor):
         Returns:
              Checkpoint object, or None if an Exception occurs.
         """
+        # storage = Checkpoint.MEMORY
+        logger.info("HHHHHHHHHHHHHHH ray_trial_executor save ")
+        # print("HHHHHHHHHHHHHHH ray_trial_executor save ", storage)
+        # print(trial.runner)
         result = result or trial.last_result
         with self._change_working_directory(trial):
             if storage == Checkpoint.MEMORY:
+                logger.info("MEMORY ray_trial_executor")
                 value = trial.runner.save_to_object.remote()
                 checkpoint = Checkpoint(storage, value, result)
                 trial.on_checkpoint(checkpoint)
             else:
+                logger.info("PERSISTENT ray_trial_executor")
+                # trial.runner.decorated_save.remote()
                 value = trial.runner.save.remote()
                 checkpoint = Checkpoint(storage, value, result)
                 trial.saving_to = checkpoint

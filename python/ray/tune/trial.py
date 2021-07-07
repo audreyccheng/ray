@@ -495,6 +495,8 @@ class Trial:
 
     def should_checkpoint(self):
         """Whether this trial is due for checkpointing."""
+        # logger.info("EEEEEEEEEEEE trial should_checkpoint False")
+        # return False
         result = self.last_result or {}
         if result.get(DONE) and self.checkpoint_at_end:
             return True

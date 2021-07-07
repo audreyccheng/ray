@@ -396,7 +396,12 @@ class FunctionRunner(Trainable):
     def execute(self, fn):
         return fn(self)
 
+    def decorated_save(self):
+        logger.info("HELLOHELLOHELLOHELLOHELLO function runner decorated_save")
+
     def save(self, checkpoint_path=None):
+        logger.info("KKKKKKKKKKKKKKKKKK function runner save")
+        logger.info(os.getpid())
         if checkpoint_path:
             raise ValueError(
                 "Checkpoint path should not be used with function API.")
@@ -436,6 +441,7 @@ class FunctionRunner(Trainable):
         return checkpoint_path
 
     def save_to_object(self):
+        logger.info("FFFFFFFFFFFFFF save_to_object function runner")
         checkpoint_path = self.save()
         obj = TrainableUtil.checkpoint_to_object(checkpoint_path)
         return obj

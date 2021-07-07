@@ -11,7 +11,9 @@ import sys
 import time
 
 # constructor decorator
-def exactly_once_init(exactly_once, filename):
+def exactly_once_init(filename): #exactly_once, 
+	checkpoint_freq = 1
+	exactly_once = False
 	def exactly_once_init_method(init_fn):
 		directory = os.path.dirname(os.path.realpath(__file__))
 		path = os.path.join(directory, filename)
@@ -19,6 +21,8 @@ def exactly_once_init(exactly_once, filename):
 
 		def wrapped_init(self, *args, **kwargs):
 			init_fn(self, *args)
+			checkpoint_freq = self.checkpoint_freq
+			exactly_once = self.exactly_once
 			if exactly_once:
 				self.requests = {}
 				self.request_count = 0
@@ -39,6 +43,7 @@ def exactly_once_init(exactly_once, filename):
 						# 	time.sleep(0.1)
 							# self.value = float(vals[2])
 						# else:
+						if self.checkpoint_freq > 1:
 							self.replay(vals[1])
 							# self.value += float(vals[1])
 						count += 1
@@ -52,13 +57,17 @@ def exactly_once_init(exactly_once, filename):
 		return wrapped_init
 	return exactly_once_init_method
 
-def exactly_once_method(checkpoint_freq, exactly_once, filename):
+def exactly_once_method(filename): # checkpoint_freq, exactly_once, 
+	checkpoint_freq = 1
+	exactly_once = False
 	def exactly_once_fn(fn):
 		directory = os.path.dirname(os.path.realpath(__file__))
 		path = os.path.join(directory, filename)
 		# server_path = os.path.join(directory, "private_" + filename)
 
 		def wrapped_fn(self, request_id, *args, **kwargs):
+			exactly_once = self.exactly_once
+			checkpoint_freq = self.checkpoint_freq
 			# print(kwargs)
 			# request_id = kwargs.get("request_id")
 			# print(request_id)
@@ -112,8 +121,8 @@ def exactly_once_method(checkpoint_freq, exactly_once, filename):
 
 @ray.remote(max_restarts=-1, max_task_retries=-1)
 class Server(object):
-	@exactly_once_init(exactly_once=False, filename="server_checkpoint.txt")
-	def __init__(self, control_actor, large_write, long_compute, no_control):
+	@exactly_once_init(filename="server_checkpoint.txt") #
+	def __init__(self, control_actor, large_write, long_compute, no_control, exactly_once, checkpoint_freq):
 		self.control_actor = control_actor
 		self.control_actor.receive_server_msg.remote(os.getpid())
 		self.value = 0
@@ -121,8 +130,10 @@ class Server(object):
 		self.large_write = large_write
 		self.long_compute = long_compute
 		self.no_control = no_control
+		self.exactly_once = exactly_once
+		self.checkpoint_freq = checkpoint_freq
 
-	@exactly_once_method(checkpoint_freq=1, exactly_once=False, filename="server_checkpoint.txt")
+	@exactly_once_method(filename="server_checkpoint.txt") # exactly_once=True, checkpoint_freq=1
 	def decorated_add(self, request_id, value, request_start):
 		# print('got client request')
 		self.value += float(value)
@@ -130,7 +141,7 @@ class Server(object):
 		self.latencies.append(time.time() - request_start)
 		# print("latencies length: ", len(self.latencies))
 		if self.long_compute:
-			time.sleep(0.001)
+			time.sleep(0.1)
 		return self.value
 
 	# return state (as string) from actor that needs to be saved
@@ -143,7 +154,7 @@ class Server(object):
 
 	def replay(self, req):
 		if self.long_compute:
-			time.sleep(0.001)
+			time.sleep(0.1)
 		self.value += float(req)
 
 	def get_latencies(self):
@@ -217,8 +228,9 @@ class ControlActor(object):
 		# print("Got server msg from ", pid)
 		# self.server_requests += 1
 		if not self.failed:
-			time.sleep(3) #3) 4) #8)  #1 #(1.05)
+			time.sleep(5) #3) 4) #8)  #1 #(1.05)
 			self.latencies += ray.get(self.server.get_latencies.remote())
+			# print("got latencies: ", len(self.latencies))
 			os.kill(pid, signal.SIGKILL)
 		self.failed = True
 		# if self.fail and self.server_requests == self.num_requests:
@@ -260,15 +272,17 @@ if __name__ == "__main__":
 	parser.add_argument("--large-write", action="store_true")
 	parser.add_argument("--long-compute", action="store_true")
 	parser.add_argument("--no-control", action="store_true")
+	parser.add_argument("--exactly-once", action="store_true")
 	parser.add_argument("--batch-rate", default=20, type=int)
 	parser.add_argument("--batch-size", required=True, type=int)
+	parser.add_argument("--checkpoint-freq", default=1, type=int)
 	args = parser.parse_args()
 	parser = argparse.ArgumentParser()
 
 	ray.init()
 
 	control = ControlActor.remote(args.fail, args.fail_after)
-	server = Server.remote(control, args.large_write, args.long_compute, args.no_control)
+	server = Server.remote(control, args.large_write, args.long_compute, args.no_control, args.exactly_once, args.checkpoint_freq)
 	ray.get(control.set_server.remote(server))
 	clients = [Client.remote(i, server, args.batch_rate, args.batch_size) for i in range(args.num_clients)]
 
@@ -294,7 +308,8 @@ if __name__ == "__main__":
 	# print("done")
 	# print("final values: ", results)
 
-	os.remove(os.path.join(os.path.dirname(os.path.realpath(__file__)), "server_checkpoint.txt"))
+	if args.exactly_once:
+		os.remove(os.path.join(os.path.dirname(os.path.realpath(__file__)), "server_checkpoint.txt"))
 	# os.remove(os.path.join(os.path.dirname(os.path.realpath(__file__)), "private_server_checkpoint.txt"))
 
 

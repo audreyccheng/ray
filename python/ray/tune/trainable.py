@@ -4,6 +4,7 @@ from datetime import datetime
 import logging
 import os
 import platform
+import ray.cloudpickle as pickle
 import shutil
 import sys
 import tempfile
@@ -29,6 +30,99 @@ from ray.util.debug import log_once
 logger = logging.getLogger(__name__)
 
 SETUP_TIME_THRESHOLD = 10
+CHECKPOINT_FREQ = 1
+EXACTLY_ONCE = False
+
+# constructor decorator
+def exactly_once_init():
+    checkpoint_freq = CHECKPOINT_FREQ
+    exactly_once = EXACTLY_ONCE
+    def exactly_once_init_method(init_fn):
+        directory = os.path.dirname("/Users/accheng/ray/python/ray/tune/examples/")#os.path.realpath(__file__))
+
+        def wrapped_init(self, *args, **kwargs):
+            init_fn(self, *args, **kwargs)
+            # checkpoint_freq = self.checkpoint_freq
+            # exactly_once = self.exactly_once
+            if exactly_once:
+                self.requests = {}
+                self.request_count = 0
+                filename = str(self._experiment_id) + ".txt"
+                logger.info("PPPPPPPPPPPPPPPP exactly_once_init trainable")
+                logger.info(filename)
+                path = os.path.join(directory, filename)
+                # restore requests
+                # try:
+                #     tstart = time.time()
+                #     f = open(path, 'r')
+                #     count = 0
+                #     for line in f:
+                #         vals = line.rstrip().split(" ")
+                #         assert(len(vals) >= 2)
+                #         self.requests[vals[0]] = float(vals[1]) #cloudpickle.loads(vals[1])
+                #         if len(vals) == 3:
+                #             self.restore_state(vals[2])
+                #         # else:
+                #         #   time.sleep(0.1)
+                #             # self.value = float(vals[2])
+                #         # else:
+                #         if self.checkpoint_freq > 1:
+                #             self.replay(vals[1])
+                #             # self.value += float(vals[1])
+                #         count += 1
+                #     print("Total lines read: ", count)
+                #     f.close()
+                #     tend = time.time()
+                #     print("Recovery time: ", tend - tstart)
+                # except FileNotFoundError:
+                #     pass
+        return wrapped_init
+    return exactly_once_init_method
+
+def exactly_once_method():
+    checkpoint_freq = CHECKPOINT_FREQ
+    exactly_once = EXACTLY_ONCE
+    def exactly_once_fn(fn):
+        directory = os.path.dirname("/Users/accheng/ray/python/ray/tune/examples/")
+        def wrapped_fn(self, *args, **kwargs):
+            filename = str(self._experiment_id) + ".txt"
+            path = os.path.join(directory, filename)
+            # logger.info("OOOOOOOOOOOOOOOOOO exactly_once_init trainable")
+            # logger.info(filename)
+
+            # exactly_once = self.exactly_once
+            # checkpoint_freq = self.checkpoint_freq
+            if exactly_once:
+                request_id = self.request_count
+                if request_id in self.requests:
+                    return self.requests[request_id]
+
+            # get result from server
+            result = fn(self, *args, **kwargs) #request_id, 
+
+            if exactly_once:
+                self.requests[request_id] = result
+                self.request_count += 1
+
+                state = {}
+                if self.request_count % checkpoint_freq == 0:
+                    state = self.get_state()
+                    state["saved_as_dict"] = True
+
+                # overwrite old requests if we checkpoint
+                if (self.request_count % checkpoint_freq) == 0 and checkpoint_freq > 1:
+                    logger.info("*************************** writing")
+                    logger.info(self.request_count)
+                    with open(path, "wb") as f:
+                        pickle.dump(state, f)
+                else:
+                    logger.info("--------------------------- appending")
+                    logger.info(self.request_count)
+                    with open(path, "ab") as f:
+                        pickle.dump(state, f)
+            return result
+        return wrapped_fn
+    return exactly_once_fn
 
 
 class Trainable:
@@ -54,6 +148,7 @@ class Trainable:
 
     """
 
+    @exactly_once_init()
     def __init__(self, config=None, logger_creator=None):
         """Initialize an Trainable.
 
@@ -193,6 +288,7 @@ class Trainable:
 
         return results
 
+    @exactly_once_method()
     def train(self):
         """Runs one logical iteration of training.
 
@@ -327,6 +423,7 @@ class Trainable:
         Returns:
             str: Checkpoint path or prefix that may be passed to restore().
         """
+        logger.info("BBBBBBBBBBB checkpoint_dir self.logdir ") #, checkpoint_dir, self.logdir)
         checkpoint_dir = TrainableUtil.make_checkpoint_dir(
             checkpoint_dir or self.logdir, index=self.iteration)
         checkpoint = self.save_checkpoint(checkpoint_dir)
@@ -345,6 +442,7 @@ class Trainable:
         Returns:
             Object holding checkpoint data.
         """
+        logger.info("CCCCCCCCCCCCCC save_to_object")
         tmpdir = tempfile.mkdtemp("save_to_object", dir=self.logdir)
         checkpoint_path = self.save(tmpdir)
         # Save all files in subtree and delete the tmpdir.
